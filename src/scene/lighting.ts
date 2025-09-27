@@ -5,4 +5,5 @@ export function addOutdoorLights(scene: THREE.Scene) {
     sun.position.set(800, 1200, 600);
     sun.castShadow = false;
     scene.add(sun);
+    return sun;
 }
