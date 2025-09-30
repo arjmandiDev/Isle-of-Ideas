@@ -1,8 +1,8 @@
 // src/scene/terrain.ts
 import * as THREE from 'three';
-import { applyFoliageMask } from '../materials/applyFoliageMask';
-import { hardenMaterials } from '../materials/commonTweaks';
-import { MeshBVH, acceleratedRaycast } from 'three-mesh-bvh';
+import {applyFoliageMask} from '../materials/applyFoliageMask';
+import {hardenMaterials} from '../materials/commonTweaks';
+import {MeshBVH, acceleratedRaycast} from 'three-mesh-bvh';
 
 // ❗️ یک‌بار و زود: جایگزینی raycast
 (THREE.Mesh as any).prototype.raycast = acceleratedRaycast as any;
@@ -19,8 +19,15 @@ export async function loadTerrain(gltfLoader: any, url: string): Promise<THREE.O
         if (o.isMesh && o.geometry?.attributes?.position) {
             const verts = o.geometry.attributes.position.count;
             if (verts >= 1000) {
-                (o.geometry as any).boundsTree = new MeshBVH(o.geometry, { lazyGeneration: false });
+                (o.geometry as any).boundsTree = new MeshBVH(o.geometry, {lazyGeneration: false});
             }
+        }
+        if (o.isMesh && o.material && o.material.map) {
+            const t = o.material.map;
+            t.magFilter = THREE.NearestFilter;
+            t.minFilter = THREE.NearestFilter;
+            t.generateMipmaps = false;
+            t.needsUpdate = true;
         }
     });
 
