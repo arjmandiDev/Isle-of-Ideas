@@ -1,40 +1,45 @@
 import * as THREE from 'three';
-import {loadTerrain} from './terrain';
-import {frameObject} from '../utils/frameObject';
-import {addOutdoorLights} from "./lighting.ts";
+import { loadTerrain } from './terrain';
+import { frameObject } from '../utils/frameObject';
+import { createPixelWater } from './water';
+import { createWorldBounds } from './bounds';
+import { createEnvironment } from './environment';
 
-export async function buildScene(scene: THREE.Scene, camera: THREE.PerspectiveCamera, gltf: any, urls: { island: string }) {
-    const sun = addOutdoorLights(scene);
-    const root = await loadTerrain(gltf, urls.island);
-    scene.add(root);
-    //printTree(root)
-    // برای فریم کردن، بزرگ‌ترین Mesh را پیدا کن:
-    let biggest: THREE.Mesh | null = null;
-    let maxVerts = -1;
-    root.traverse((o: any) => {
-        if (o.isMesh && o.geometry?.attributes?.position) {
-            const v = o.geometry.attributes.position.count;
-            if (v > maxVerts) { maxVerts = v; biggest = o; }
-        }
-    });
-    if (biggest) frameObject(biggest, camera, 1.2);
+type URLs = { island: string };
 
-    return { sun, terrainRoot: root }; // توجه: terrainRoot = root (Group)
+export async function buildScene(
+    scene: THREE.Scene,
+    camera: THREE.PerspectiveCamera,
+    gltf: any,
+    urls: URLs
+) {
+    // زمین
+    const terrain = await loadTerrain(gltf, urls.island);
+    scene.add(terrain);
+
+    // مه سبک
+    scene.fog = new THREE.FogExp2(0xa7d4ff, 0.0005);
+
+    // آب
+    const WATER_Y = 6.5; // تیون با دادهٔ خودت
+    const water = createPixelWater({ y: WATER_Y, size: 8000, opacity: 0.8 });
+    scene.add(water);
+    (scene as any).__waterTick__ = (dt: number) => (water as any).tick?.(dt);
+
+    // مرز دنیا
+    const box = new THREE.Box3().setFromObject(terrain);
+    const center = box.getCenter(new THREE.Vector3());
+    const radiusIsland = Math.hypot(box.max.x - center.x, box.max.z - center.z);
+    const softRadius = radiusIsland + 80;
+    const hardRadius = softRadius + 60;
+    const bounds = createWorldBounds({ center, softRadius, hardRadius });
+    scene.add(bounds.group);
+
+    // محیط: خورشید/ماه مربعی + نور
+    const env = createEnvironment(scene, 5000);
+
+    // قاب‌بندی اولیه
+    frameObject(terrain, camera, 1.2);
+
+    return { terrain, water, bounds, env, center };
 }
-function printTree(root: THREE.Object3D) {
-    console.group('GLTF Tree');
-    root.traverse((o: any) => {
-        const t = o.type; // Group / Mesh / SkinnedMesh ...
-        const name = o.name || '(no-name)';
-        const vcount = o.isMesh ? o.geometry?.attributes?.position?.count : 0;
-        console.log(`${t.padEnd(12)} | ${name} | verts: ${vcount}`);
-    });
-    console.groupEnd();
-}
-//
-// export async function buildScene(scene: THREE.Scene, camera: THREE.PerspectiveCamera, gltf: any, urls: { island: string }) {
-//     const island = await loadTerrain(gltf, urls.island);
-//     scene.background = new THREE.Color(0x7ec8e3)
-//     scene.add(island);
-//     frameObject(island, camera, 1.2);
-// }
