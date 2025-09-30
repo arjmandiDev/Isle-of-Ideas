@@ -6,6 +6,7 @@ import {buildScene} from './scene/buildScene';
 import {PATHS} from './config';
 import {Player} from './scene/player';
 import {mountGUI} from './ui/gui';
+import {spawnOnTerrain} from "./utils/spawn.ts";
 
 const renderer = createRenderer();
 document.getElementById('app')!.appendChild(renderer.domElement);
@@ -15,9 +16,10 @@ const player = new Player(scene);
 
 const {gltf} = createLoaders(renderer, PATHS.BASIS);
 
-const {terrain, bounds, env} =
+const {terrain, bounds, env, center} =
     await buildScene(scene, player.camera as THREE.PerspectiveCamera, gltf, {island: PATHS.ISLAND});
 
+await spawnOnTerrain(player, terrain, { center, searchRadius: 30, tries: 25 });
 // GUI (اختیاری)
 if (import.meta.env.DEV) {
     mountGUI({renderer, player, env});
