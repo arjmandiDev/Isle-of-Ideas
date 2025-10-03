@@ -33,10 +33,10 @@ export function mountGUI({
     const fPlayer = gui.addFolder('Player');
     fPlayer.add(player, 'maxSpeed', 1, 20, 0.1).name('Max Speed');
 
-    const fEnv = gui.addFolder('Environment');
-    fEnv.add(params, 'time', 0, 1, 0.001).name('Time of Day').onChange((v: number) => {
-        env.update(v, player.camera);
-    });
+    // const fEnv = gui.addFolder('Environment');
+    // fEnv.add(params, 'time', 0, 1, 0.001).name('Time of Day').onChange((v: number) => {
+    //     env.update(v, player.camera);
+    // });
 
     return gui;
 }
