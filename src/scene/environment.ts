@@ -1,12 +1,21 @@
 // src/scene/environment.ts
 import * as THREE from 'three';
+import { createSkyEnv } from './skyEnv';
+import { computeSunMoon } from '../services/astro';
 
 export type Environment = {
     sunLight: THREE.DirectionalLight;
     moonLight: THREE.DirectionalLight;
     sunPlane: THREE.Mesh;
     moonPlane: THREE.Mesh;
-    update: (time01: number, camera: THREE.Camera) => void;
+
+    updateFromAstro: (params: {
+        sunAltDeg: number;
+        sunAzDeg: number;
+        moonAltDeg: number;
+        moonAzDeg: number;
+        camera: THREE.Camera;
+    }) => void;
 };
 
 function lerpHex(a: number, b: number, t: number) {
@@ -14,22 +23,11 @@ function lerpHex(a: number, b: number, t: number) {
 }
 
 function skyColorFromElevation(elev: number, evening: boolean) {
-    // پالت
-    const NIGHT = 0x0b1a2b;
-    const DAY   = 0x87c8ff;
-    const DAWN  = 0xffc6a3;         // هلوییِ صبح
-    const DUSK  = 0xffa07a;         // نارنجیِ غروب
-    const WARM  = evening ? DUSK : DAWN;
-
-    // سهم روز/شب: -0.05 → 0 ، 0.25 → 1
-    const dayFac  = THREE.MathUtils.smoothstep(elev, -0.05, 0.25);
-
-    // گرمیِ افق: وقتی |elev| نزدیک صفر است ماکزیمم شود (±0.12)
+    const NIGHT = 0x0b1a2b, DAY = 0x87c8ff, DAWN = 0xffc6a3, DUSK = 0xffa07a;
+    const WARM = evening ? DUSK : DAWN;
+    const dayFac = THREE.MathUtils.smoothstep(elev, -0.05, 0.25);
     const warmFac = 1 - THREE.MathUtils.smoothstep(Math.abs(elev), 0.0, 0.12);
-
-    // پایه: بین شب و روز
     const base = lerpHex(NIGHT, DAY, dayFac);
-    // گرادیان گرم نزدیک افق
     return lerpHex(base, WARM, warmFac * 0.9);
 }
 
@@ -48,83 +46,127 @@ function skyColor(time01: number) {
 }
 
 export function createEnvironment(scene: THREE.Scene, radius = 3000): Environment {
-    // --- نورها ---
     const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
     const moonLight = new THREE.DirectionalLight(0x8ea6ff, 0.4);
+    const SUN_HORIZON = -0.833; // برای طلوع/غروب
+    const MOON_HORIZON = -0.3;
     sunLight.castShadow = moonLight.castShadow = false;
     scene.add(sunLight, moonLight);
 
     const hemi = new THREE.HemisphereLight(0xbbe1ff, 0x223344, 0.45);
     scene.add(hemi);
 
-    // --- اسپرایت مربعی خورشید/ماه (بدون تکسچر) ---
     const sunPlane = new THREE.Mesh(
         new THREE.PlaneGeometry(1, 1),
-        new THREE.MeshBasicMaterial({ color: 0xffee88, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false })
+        new THREE.MeshBasicMaterial({
+            color: 0xffee88,
+            transparent: true,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            fog: false
+        })
     );
     const moonPlane = new THREE.Mesh(
         new THREE.PlaneGeometry(1, 1),
-        new THREE.MeshBasicMaterial({ color: 0xbfd4ff, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false })
+        new THREE.MeshBasicMaterial({
+            color: 0xbfd4ff,
+            transparent: true,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            fog: false
+        })
     );
     scene.add(sunPlane, moonPlane);
 
-    // --- به‌روزرسانی هر فریم ---
-    function update(time01: number, camera: THREE.Camera) {
-        // 1) رنگ پس‌زمینه آسمان
-        scene.background = new THREE.Color(skyColor(time01));
-
-        // 2) جهت/موقعیت خورشید و ماه
-        const angle = time01 * Math.PI * 2; // 0=نیمه‌شب، 0.5=ظهر
-        const sunDir = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0).normalize();
-        const moonDir = sunDir.clone().negate();
-
+    function placeBody(dir: THREE.Vector3, plane: THREE.Mesh, light: THREE.DirectionalLight, camera: THREE.Camera, radius: number) {
         const camFar = (camera as THREE.PerspectiveCamera).far ?? 2000;
-        const dist = Math.min(radius, camFar * 0.8); // همیشه داخل فرِاستوم
+        const dist = Math.min(radius, camFar * 0.8);
+        const pos = dir.clone().multiplyScalar(dist);
 
-        const sunPos = sunDir.clone().multiplyScalar(dist);
-        const moonPos = moonDir.clone().multiplyScalar(dist);
+        light.position.copy(pos);
+        light.target.position.set(0, 0, 0);
+        light.target.updateMatrixWorld();
 
-        sunLight.position.copy(sunPos);
-        sunLight.target.position.set(0, 0, 0);
-        sunLight.target.updateMatrixWorld();
+        plane.position.copy(pos);
+        plane.lookAt((camera as THREE.Camera).position);
 
-        moonLight.position.copy(moonPos);
-        moonLight.target.position.set(0, 0, 0);
-        moonLight.target.updateMatrixWorld();
-
-        // 3) اندازه اسپرایت‌ها بر اساس FOV (≈ 12% ارتفاع تصویر)
+        // اندازهٔ اسپرایت ≈ 12% ارتفاع فریم در آن فاصله
         const fovDeg = (camera as THREE.PerspectiveCamera).fov ?? 70;
         const fovRad = THREE.MathUtils.degToRad(fovDeg);
         const viewHalfH = Math.tan(fovRad / 2) * dist;
         const spriteH = viewHalfH * 2 * 0.12;
-        const spriteW = spriteH;
+        plane.scale.set(spriteH, spriteH, 1);
+    }
 
-        sunPlane.position.copy(sunPos);
-        moonPlane.position.copy(moonPos);
-        sunPlane.scale.set(spriteW, spriteH, 1);
-        moonPlane.scale.set(spriteW, spriteH, 1);
-        sunPlane.lookAt((camera as THREE.Camera).position);
-        moonPlane.lookAt((camera as THREE.Camera).position);
-
-        const sunUp = sunDir.y > -0.03;
-        const moonUp = moonDir.y > -0.03;
-        sunPlane.visible = sunUp;
-        moonPlane.visible = moonUp;
-
-        // 4) شدت نورها و نور محیطی بر اساس ارتفاع خورشید
-        const daylight = THREE.MathUtils.smoothstep(sunDir.y, -0.05, 0.25); // 0..1
-        sunLight.intensity = THREE.MathUtils.lerp(0.25, 1.15, daylight);   // شب کم، روز زیاد
-        moonLight.intensity = THREE.MathUtils.lerp(0.6, 0.0, daylight);    // شب زیاد، روز صفر
-        hemi.intensity = THREE.MathUtils.lerp(0.55, 0.35, daylight);       // شب روشن‌تر
-
-        // رنگ آسمان و مه با ارتفاع خورشید
-        const isEvening = sunDir.x < 0; // صبح/غروب برای انتخاب تون هلویی
-        const bgHex = skyColorFromElevation(sunDir.y, isEvening);
+    function tintSkyBySunElevation(elevY: number, camera: THREE.Camera) {
+        const bgHex = skyColorFromElevation(elevY, /*evening hint*/ elevY >= 0 ? false : false);
         scene.background = new THREE.Color(bgHex);
         if (scene.fog && (scene.fog as THREE.FogExp2).isFogExp2) {
             (scene.fog as THREE.FogExp2).color.setHex(bgHex);
         }
+        const daylight = THREE.MathUtils.smoothstep(elevY, -0.05, 0.25);
+        sunLight.intensity  = THREE.MathUtils.lerp(0.25, 1.15, daylight);
+        moonLight.intensity = THREE.MathUtils.lerp(0.6,  0.0,  daylight);
     }
 
-    return { sunLight, moonLight, sunPlane, moonPlane, update };
+    function updateFromAstro({ sunAltDeg, sunAzDeg, moonAltDeg, moonAzDeg, camera }: {
+        sunAltDeg: number; sunAzDeg: number; moonAltDeg: number; moonAzDeg: number; camera: THREE.Camera;
+    }) {
+        const sunDir  = dirFromAltAz(sunAltDeg,  sunAzDeg);
+        const moonDir = dirFromAltAz(moonAltDeg, moonAzDeg);
+
+        // 1) آسمان/نور بر اساس ارتفاع واقعی خورشید
+        tintSkyBySunElevation(sunDir.y, camera);
+
+        // 2) جایگذاری اسپرایت‌ها و نورها
+        placeBody(sunDir,  sunPlane,  sunLight,  camera, radius);
+        placeBody(moonDir, moonPlane, moonLight, camera, radius);
+
+        // 3) «قابلیت دیده‌شدن» مستقل
+        const sunUp  = sunAltDeg  > SUN_HORIZON;
+        const moonUp = moonAltDeg > MOON_HORIZON;
+        sunPlane.visible  = sunUp;
+        moonPlane.visible = moonUp;
+
+        // 4) اگر هر دو بالای افق‌اند → ماه را کم‌رنگ/کم‌نور کن (daylight moon)
+        //    dimFactor با ارتفاع خورشید زیاد می‌شود: کنار افق ≈ کم، ظهر ≈ زیاد
+        if (sunUp && moonUp) {
+            const daylight = THREE.MathUtils.smoothstep(sunAltDeg, 0, 35);
+            const mat = moonPlane.material as THREE.MeshBasicMaterial;
+            mat.color.setHex(0xbfd4ff).lerp(new THREE.Color(0xd0d8e8), 0.6 * daylight);
+            mat.opacity = THREE.MathUtils.lerp(1.0, 0.25, daylight);
+            moonLight.intensity = THREE.MathUtils.lerp(0.4, 0.1, daylight);
+        } else if (moonUp) {
+            const mat = moonPlane.material as THREE.MeshBasicMaterial;
+            mat.color.setHex(0xbfd4ff);
+            mat.opacity = 1.0;
+        }
+    }
+
+    function dirFromAltAz(altDeg: number, azDeg: number) {
+        const alt = THREE.MathUtils.degToRad(altDeg);
+        const az = THREE.MathUtils.degToRad(azDeg);
+        const ca = Math.cos(alt), sa = Math.sin(alt);
+        const cz = Math.cos(az), sz = Math.sin(az);
+        return new THREE.Vector3(sz * ca, sa, cz * ca);
+    }
+
+    return { sunLight, moonLight, sunPlane, moonPlane, updateFromAstro };
+}
+
+
+
+export function addEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRenderer, lat: number, lon: number, date: Date) {
+    const env = createSkyEnv(scene, renderer);
+
+    // یک‌بار ست بر اساس نجوم واقعی:
+    const astro = computeSunMoon(lat, lon, date);
+    env.setFromAltAz(astro.sun.altitudeDeg, astro.sun.azimuthDeg);
+    env.setDayNightExtras(astro.sun.altitudeDeg);
+
+    // اگر ابرهای بلوکی/ستاره داری:
+    //  - clouds.group.renderOrder = 2 (opaque)
+    //  - stars.renderOrder = 3; starMat.depthWrite=false; starMat.depthTest=false;
+
+    return env;
 }
