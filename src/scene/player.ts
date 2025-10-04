@@ -63,6 +63,7 @@ export class Player {
 
     constructor(scene: THREE.Scene) {
         this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 10000);
+        this.camera.layers.enable(2);
         this.camera.position.set(0, 2, 5);
         this.camera.rotation.order = 'YXZ';
         scene.add(this.camera);

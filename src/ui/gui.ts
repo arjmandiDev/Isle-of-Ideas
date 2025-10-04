@@ -6,12 +6,10 @@ import type { Environment } from '../scene/environment';
 
 export function mountGUI({
                              renderer,
-                             player,
-                             env
+                             player
                          }: {
     renderer: THREE.WebGLRenderer;
     player: Player;
-    env: Environment;
 }) {
     const gui = new GUI();
 

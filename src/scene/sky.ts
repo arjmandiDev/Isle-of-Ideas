@@ -3,7 +3,9 @@ import * as THREE from 'three';
 
 export type Sky = {
     group: THREE.Group;
-    setDaylight: (day01: number) => void;           // 0=شب، 1=روز
+    setDaylight: (day01: number) => void;
+    setStarsBySun: (altDeg:number,sunDir?:THREE.Vector3) => void;// 0=شب، 1=روز
+    starsOpacityFromSunAlt: (altDeg:number) => number;
     tick: (dt: number, camera: THREE.Camera) => void;
 };
 
@@ -19,9 +21,6 @@ export function createSky(opts?: {
         radius = 5000,
         starCount = 3000,
         starSize = 1.5,
-        cloudY = 900,
-        cloudSpeed = 0.004,
-        cloudRepeat = 32,
     } = opts ?? {};
 
     const group = new THREE.Group();
@@ -46,32 +45,37 @@ export function createSky(opts?: {
         size: starSize,
         sizeAttenuation: false,   // اندازه پیکسلی ثابت (استایل ماین‌کرفت)
         transparent: true,
-        depthWrite: false,
         blending: THREE.AdditiveBlending
     });
+    starMat.depthWrite = false;
+    starMat.depthTest  = true;
     const stars = new THREE.Points(starGeo, starMat);
+    stars.renderOrder=-5;
     group.add(stars);
 
     // ---------- Clouds ----------
-    const cloudTex = makePixelCloudTexture(256);
-    cloudTex.magFilter = THREE.NearestFilter;
-    cloudTex.minFilter = THREE.NearestFilter;
-    cloudTex.wrapS = cloudTex.wrapT = THREE.RepeatWrapping;
-    cloudTex.repeat.set(cloudRepeat, cloudRepeat);
-
-    const cloudMat = new THREE.MeshBasicMaterial({
-        map: cloudTex,
-        transparent: true,
-        opacity: 0.85,         // شب کمی تیره‌ترش می‌کنیم
-        depthWrite: false,
-        fog: false
-    });
-
-    const planeSize = radius * 2; // خیلی بزرگ، بیرون دید
-    const clouds = new THREE.Mesh(new THREE.PlaneGeometry(planeSize, planeSize), cloudMat);
-    clouds.rotation.x = -Math.PI / 2;  // رو به پایین
-    clouds.position.y = cloudY;
-    group.add(clouds);
+    // const cloudTex = makePixelCloudTexture(128, { scale: 5, levels: 4, coverage: 0.55 });
+    // cloudTex.repeat.set(32, 32);
+    // cloudTex.magFilter = THREE.NearestFilter;
+    // cloudTex.minFilter = THREE.NearestFilter;
+    // cloudTex.wrapS = cloudTex.wrapT = THREE.RepeatWrapping;
+    // cloudTex.repeat.set(cloudRepeat, cloudRepeat);
+    //
+    // const cloudMat = new THREE.MeshBasicMaterial({
+    //     map: cloudTex,
+    //     transparent: true,
+    //     opacity: 0.85,         // شب کمی تیره‌ترش می‌کنیم
+    //     depthWrite: false,
+    //     fog: false,
+    //     side: THREE.DoubleSide
+    // });
+    //
+    // const planeSize = radius * 2; // خیلی بزرگ، بیرون دید
+    // const clouds = new THREE.Mesh(new THREE.PlaneGeometry(planeSize, planeSize), cloudMat);
+    // clouds.rotation.x = -Math.PI / 2;  // رو به پایین
+    // clouds.position.y = cloudY;
+    // clouds.renderOrder =2;
+    // group.add(clouds);
 
     function setDaylight(day01: number) {
         // ستاره‌ها در روز محو شوند (اما نه ناگهان)
@@ -80,36 +84,36 @@ export function createSky(opts?: {
         stars.visible = starOpacity > 0.02;
 
         // شب کمی ابرها را پررنگ‌تر (حس کنتراست)
-        cloudMat.opacity = THREE.MathUtils.lerp(0.65, 0.9, 1 - day01);
+        //cloudMat.opacity = THREE.MathUtils.lerp(0.65, 0.9, 1 - day01);
     }
+    function starsOpacityFromSunAlt(altDeg:number){
+        if (altDeg > -2) return 0;
+        if (altDeg < -12) return 1;
+        // دو مرحله: -2→-6 (0→0.4) و -6→-12 (0.4→1)
+        if (altDeg > -6) return ( (-altDeg - 2) / 4 ) * 0.4;
+        return 0.4 + ( (-altDeg - 6) / 6 ) * 0.6;
+    }
+    function setStarsBySun(altDeg: number, sunDir?: THREE.Vector3) {
+        // 0..1: 0 = روز، 1 = شب کامل
+        // بین -6 و -12 محو/ظاهر می‌شوند
+        const a = altDeg;
+        let night01 = 0;
+        if (a < -6) night01 = THREE.MathUtils.clamp((-a - 6) / 6, 0, 1); // -6→0 , -12→1
+        stars.material.opacity = night01;
+        stars.visible = night01 > 0.02;
 
+        // اگر خواستی اطراف خورشید ستاره‌ها خاموش‌تر شوند:
+        // (برای PointsMaterial ساده نیست جهت‌محور؛ اگر shader برای ستاره‌ها خواستی بگم چطور)
+    }
     function tick(dt: number, camera: THREE.Camera) {
         // حرکت آرام ابرها
-        (cloudMat.map as THREE.Texture).offset.x += cloudSpeed * dt;
-        (cloudMat.map as THREE.Texture).offset.y += cloudSpeed * 0.33 * dt;
+        // (cloudMat.map as THREE.Texture).offset.x += cloudSpeed * dt;
+        // (cloudMat.map as THREE.Texture).offset.y += cloudSpeed * 0.33 * dt;
 
         // آسمان را به دوربین قفل کن تا «بی‌نهایت» حس شود
         const cp = (camera as THREE.PerspectiveCamera).position;
         group.position.set(cp.x, 0, cp.z);
     }
 
-    return { group, setDaylight, tick };
-}
-
-// تکسچر ابر پیکسلی با Canvas (بدون فایل خارجی)
-function makePixelCloudTexture(n: number) {
-    const c = document.createElement('canvas');
-    c.width = c.height = n;
-    const ctx = c.getContext('2d')!;
-    ctx.clearRect(0, 0, n, n);
-
-    const cell = 8; // شبکهٔ درشت برای حس پیکسلی
-    ctx.fillStyle = 'rgba(255,255,255,0.95)';
-    for (let y = 0; y < n; y += cell) {
-        for (let x = 0; x < n; x += cell) {
-            if (Math.random() < 0.35) ctx.fillRect(x, y, cell, cell);
-        }
-    }
-    // اگر بخوای می‌تونی لبه‌ها رو کمی نرم کنی (اما پیکسلی می‌مونه)
-    return new THREE.CanvasTexture(c);
+    return { group, setDaylight,setStarsBySun, tick, starsOpacityFromSunAlt };
 }

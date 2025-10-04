@@ -1,5 +1,7 @@
 // src/scene/environment.ts
 import * as THREE from 'three';
+import { createSkyEnv } from './skyEnv';
+import { computeSunMoon } from '../services/astro';
 
 export type Environment = {
     sunLight: THREE.DirectionalLight;
@@ -140,69 +142,6 @@ export function createEnvironment(scene: THREE.Scene, radius = 3000): Environmen
             mat.opacity = 1.0;
         }
     }
-// نسخهٔ قبلی برای سازگاری باقی بماند:
-//     function update(time01: number, camera: THREE.Camera) {
-//         const angle = time01 * Math.PI * 2; // 0=نیمه‌شب، 0.5=ظهر
-//         const sunDir = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0).normalize();
-//         const moonDir = sunDir.clone().negate();
-//         tintSkyBySunElevation(sunDir.y, camera);
-//         placeBody(sunDir,  sunPlane,  sunLight,  camera);
-//         placeBody(moonDir, moonPlane, moonLight, camera);
-//         sunPlane.visible  = sunDir.y  > -0.03;
-//         moonPlane.visible = moonDir.y > -0.03;
-//     }
-
-    // function update(time01: number, camera: THREE.Camera) {
-    //     // محاسبهٔ جهت خورشید از time01
-    //     const angle = time01 * Math.PI * 2;               // 0=نیمه‌شب، 0.5=ظهر
-    //     const sunDir = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0).normalize();
-    //     const moonDir = sunDir.clone().negate();
-    //
-    //     // رنگ آسمان بر اساس ارتفاع واقعی خورشید
-    //     const bgHex = skyColorFromElevation(sunDir.y, sunDir.x < 0);
-    //     scene.background = new THREE.Color(bgHex);
-    //     if (scene.fog && (scene.fog as THREE.FogExp2).isFogExp2) {
-    //         (scene.fog as THREE.FogExp2).color.setHex(bgHex);
-    //     }
-    //
-    //     const camFar = (camera as THREE.PerspectiveCamera).far ?? 2000;
-    //     const dist = Math.min(radius, camFar * 0.8);
-    //
-    //     const sunPos = sunDir.clone().multiplyScalar(dist);
-    //     const moonPos = moonDir.clone().multiplyScalar(dist);
-    //
-    //     sunLight.position.copy(sunPos);
-    //     sunLight.target.position.set(0, 0, 0);
-    //     sunLight.target.updateMatrixWorld();
-    //
-    //     moonLight.position.copy(moonPos);
-    //     moonLight.target.position.set(0, 0, 0);
-    //     moonLight.target.updateMatrixWorld();
-    //
-    //     // اندازهٔ اسپرایت‌ها متناسب با FOV (≈12% ارتفاع تصویر)
-    //     const fovDeg = (camera as THREE.PerspectiveCamera).fov ?? 70;
-    //     const fovRad = THREE.MathUtils.degToRad(fovDeg);
-    //     const viewHalfH = Math.tan(fovRad / 2) * dist;
-    //     const spriteH = viewHalfH * 2 * 0.12;
-    //     const spriteW = spriteH;
-    //
-    //     sunPlane.position.copy(sunPos);
-    //     moonPlane.position.copy(moonPos);
-    //     sunPlane.scale.set(spriteW, spriteH, 1);
-    //     moonPlane.scale.set(spriteW, spriteH, 1);
-    //     sunPlane.lookAt((camera as THREE.Camera).position);
-    //     moonPlane.lookAt((camera as THREE.Camera).position);
-    //
-    //     const sunUp = sunDir.y > -0.03;
-    //     const moonUp = moonDir.y > -0.03;
-    //     sunPlane.visible = sunUp;
-    //     moonPlane.visible = moonUp;
-    //
-    //     const daylight = THREE.MathUtils.smoothstep(sunDir.y, -0.05, 0.25);
-    //     sunLight.intensity = THREE.MathUtils.lerp(0.25, 1.15, daylight);
-    //     moonLight.intensity = THREE.MathUtils.lerp(0.6, 0.0, daylight);
-    //     hemi.intensity = THREE.MathUtils.lerp(0.55, 0.35, daylight);
-    // }
 
     function dirFromAltAz(altDeg: number, azDeg: number) {
         const alt = THREE.MathUtils.degToRad(altDeg);
@@ -213,4 +152,21 @@ export function createEnvironment(scene: THREE.Scene, radius = 3000): Environmen
     }
 
     return { sunLight, moonLight, sunPlane, moonPlane, updateFromAstro };
+}
+
+
+
+export function addEnvironment(scene: THREE.Scene, renderer: THREE.WebGLRenderer, lat: number, lon: number, date: Date) {
+    const env = createSkyEnv(scene, renderer);
+
+    // یک‌بار ست بر اساس نجوم واقعی:
+    const astro = computeSunMoon(lat, lon, date);
+    env.setFromAltAz(astro.sun.altitudeDeg, astro.sun.azimuthDeg);
+    env.setDayNightExtras(astro.sun.altitudeDeg);
+
+    // اگر ابرهای بلوکی/ستاره داری:
+    //  - clouds.group.renderOrder = 2 (opaque)
+    //  - stars.renderOrder = 3; starMat.depthWrite=false; starMat.depthTest=false;
+
+    return env;
 }

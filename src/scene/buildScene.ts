@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { loadTerrain } from './terrain';
-import { frameObject } from '../utils/frameObject';
-import { createPixelWater } from './water';
-import { createWorldBounds } from './bounds';
-import { createSky } from './sky';
+import {loadTerrain} from './terrain';
+import {frameObject} from '../utils/frameObject';
+import {createPixelWater} from './water';
+import {createWorldBounds} from './bounds';
+import {createSky} from './sky';
+import {createBlockClouds} from './blockClouds';
 
 type URLs = { island: string };
 
@@ -26,12 +27,23 @@ export async function buildScene(
     scene.add(sky.group);
 
 
+    const clouds = createBlockClouds({
+        areaSize: 1024,  // کمی بزرگ‌تر از جزیره
+        cell: 16,        // اندازهٔ بلوک ابر
+        thickness: 1,    // ماینکرفت کلاسیک
+        height: 220,
+        density: 0.6,
+        speed: 1.0
+    });
+    scene.add(clouds.group);
+    (scene as any).__cloudTick__ = (dt: number) => clouds.tick(dt);
+
     // مه سبک
     scene.fog = new THREE.FogExp2(0xa7d4ff, 0.0005);
 
     // آب
     const WATER_Y = 6.5; // تیون با دادهٔ خودت
-    const water = createPixelWater({ y: WATER_Y, size: 8000, opacity: 0.95 });
+    const water = createPixelWater({y: WATER_Y, size: 8000, opacity: 0.95});
     scene.add(water);
     (scene as any).__waterTick__ = (dt: number) => (water as any).tick?.(dt);
 
@@ -41,7 +53,7 @@ export async function buildScene(
     const radiusIsland = Math.hypot(box.max.x - center.x, box.max.z - center.z);
     const softRadius = radiusIsland + 80;
     const hardRadius = softRadius + 60;
-    const bounds = createWorldBounds({ center, softRadius, hardRadius });
+    const bounds = createWorldBounds({center, softRadius, hardRadius});
     scene.add(bounds.group);
 
     // محیط: خورشید/ماه مربعی + نور
@@ -51,5 +63,5 @@ export async function buildScene(
     // قاب‌بندی اولیه
     frameObject(terrain, camera, 1.2);
 
-    return { terrain, water, bounds, center, sky };
+    return {terrain, water, bounds, center, sky, clouds};
 }
