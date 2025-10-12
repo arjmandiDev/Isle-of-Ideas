@@ -53,29 +53,6 @@ export function createSky(opts?: {
     stars.renderOrder=-5;
     group.add(stars);
 
-    // ---------- Clouds ----------
-    // const cloudTex = makePixelCloudTexture(128, { scale: 5, levels: 4, coverage: 0.55 });
-    // cloudTex.repeat.set(32, 32);
-    // cloudTex.magFilter = THREE.NearestFilter;
-    // cloudTex.minFilter = THREE.NearestFilter;
-    // cloudTex.wrapS = cloudTex.wrapT = THREE.RepeatWrapping;
-    // cloudTex.repeat.set(cloudRepeat, cloudRepeat);
-    //
-    // const cloudMat = new THREE.MeshBasicMaterial({
-    //     map: cloudTex,
-    //     transparent: true,
-    //     opacity: 0.85,         // شب کمی تیره‌ترش می‌کنیم
-    //     depthWrite: false,
-    //     fog: false,
-    //     side: THREE.DoubleSide
-    // });
-    //
-    // const planeSize = radius * 2; // خیلی بزرگ، بیرون دید
-    // const clouds = new THREE.Mesh(new THREE.PlaneGeometry(planeSize, planeSize), cloudMat);
-    // clouds.rotation.x = -Math.PI / 2;  // رو به پایین
-    // clouds.position.y = cloudY;
-    // clouds.renderOrder =2;
-    // group.add(clouds);
 
     function setDaylight(day01: number) {
         // ستاره‌ها در روز محو شوند (اما نه ناگهان)

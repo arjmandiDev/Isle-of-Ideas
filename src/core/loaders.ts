@@ -5,8 +5,10 @@ import * as THREE from 'three';
 
 export function createLoaders(renderer: THREE.WebGLRenderer, basisPath: string) {
     const gltf = new GLTFLoader();
-    const ktx2 = new KTX2Loader().setTranscoderPath(basisPath).detectSupport(renderer);
-    gltf.setKTX2Loader(ktx2);
     gltf.setMeshoptDecoder(MeshoptDecoder);
-    return { gltf, ktx2 };
+    if (basisPath){
+        const ktx2 = new KTX2Loader().setTranscoderPath(basisPath).detectSupport(renderer);
+        gltf.setKTX2Loader(ktx2);
+    }
+    return { gltf };
 }
