@@ -6,12 +6,11 @@ import { createWorldBounds } from './bounds';
 import { createSky } from './sky';
 import { createBlockClouds } from './blockClouds';
 import { PATHS } from '../config';
-import { initTreeEditor } from '../utils/treeEditor';
+import { TreeEditor } from '../utils/treeEditor';
 import { preloadTreePrototypes } from './preloadTreePrototypes';
 import { spawnTreesFromLayout } from './spawnTreesFromLayout';
 import type {GLTFLoader} from "three/examples/jsm/loaders/GLTFLoader.js";
 import {RayViz} from "../utils/rayViz.ts";
-import {setIslandWireframe} from "../utils/islandWireframe.ts";
 
 type URLs = { island: string };
 
@@ -98,16 +97,20 @@ export async function buildScene(
     (scene as any).__treesTick__ = (cam: THREE.Camera) => {
         (treesGroup as any).tick?.(cam);
     };
+    const gui = (window as any).gui; // فولدر Controls توی اسکرین‌شات هست
+    const treeFolder = gui?.addFolder?.('TreeEditor');
 
+    const editor = new TreeEditor(scene,camera, terrain, protos, treeFolder);
+    (window as any).treeEditor = editor;
     // 5) ادیتور: از حالا ذخیره‌ها terrain-local هستند
-    const editor = initTreeEditor({
-        scene, camera, renderer, terrain,
-        storageKey: 'island_editor.trees', // همان کلید قبلی، ولی مدل داده جدید
-        defaultType: 'tree_type1',
-        hud: true,
-    });
-    // اگر terrain تعویض شد:
-    editor.refreshTargets();
+    // const editor = initTreeEditor({
+    //     scene, camera, renderer, terrain,
+    //     storageKey: 'island_editor.trees', // همان کلید قبلی، ولی مدل داده جدید
+    //     defaultType: 'tree_type1',
+    //     hud: true,
+    // });
+    // // اگر terrain تعویض شد:
+    // editor.refreshTargets();
 
     const rayViz = new RayViz({
         scene,

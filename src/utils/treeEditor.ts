@@ -1,215 +1,208 @@
-import * as THREE from 'three';
+import * as THREE from "three";
+import {bindTreeEditorHotkeys} from "../scene/input/hotkeys.ts";
+import {buildChunkedInstancedTrees} from "../scene/buildInstancedTrees.ts";
+import type {TreeProto} from "../scene/preloadTreePrototypes.ts";
 
-type TreeRecord = {
+export type TreeRecord = {
     type: string;
-    pos: [number, number, number]; // ⬅️ ذخیره به‌صورت terrain-local
-    rotY?: number;                  // اختیاری برای آینده
-    scale?: number;                 // اختیاری برای آینده
-    space?: 'terrain-local';        // نشانگر نسخهٔ جدید
-};
+    pos: [number, number, number];
+    rotY?: number;
+    scale?: number;
+    space?: number;
+}
 
-type InitOpts = {
-    scene: THREE.Scene;
+const LS_KEY = 'island_editor.trees';
+
+export class TreeEditor {
     camera: THREE.Camera;
-    renderer: THREE.WebGLRenderer;
-    terrain: THREE.Object3D;
-    storageKey?: string;            // پیش‌فرض: 'island_editor.trees'
-    defaultType?: string;           // پیش‌فرض: 'tree_type1'
-    hud?: boolean;                  // پیش‌فرض: true
-};
+    scene: THREE.Scene;
+    terrainRoot: THREE.Object3D;
+    protos: Map<string, TreeProto>;
 
-export function initTreeEditor(opts: InitOpts) {
-    const {
-        scene,
-        camera,
-        renderer,
-        terrain,
-        storageKey = 'island_editor.trees',
-        defaultType = 'tree_type1',
-        hud = true,
-    } = opts;
+    editing = true;
+    currentType: string;
+    types: string[];
 
-    // --- singleton guard ---
-    const existing = (window as any).__treeEditor as { destroy: () => void } | undefined;
-    if (existing) existing.destroy();
+    records: TreeRecord[] = [];
+    byType = new Map<string, TreeRecord[]>();
+    groups = new Map<string, THREE.Group>()
 
-    // --- state ---
-    let list: TreeRecord[] = readList(storageKey);
-    let currentType = defaultType;
-    let editMode = true;
+    guiFolder?: any;
 
-    // --- pick targets (فقط مش‌های terrain) ---
-    let pickTargets: THREE.Mesh[] = [];
-    rebuildPickTargets(terrain);
+    private unbind?: (() => void) | null = null;
+    private raycaster = new THREE.Raycaster()
+    private tmpV = new THREE.Vector3();
 
-    // --- Raycaster ---
-    const ray = new THREE.Raycaster();
-    ray.layers.mask = terrain.layers.mask;
+    constructor(scene: THREE.Scene, camera: THREE.Camera, terrainRoot: THREE.Object3D, protos: Map<string, TreeProto>, guiFolder?: any) {
+        this.scene = scene;
+        this.camera = camera;
+        this.terrainRoot = terrainRoot;
+        this.protos = protos;
+        this.types = Array.from(protos.keys());
+        this.currentType = this.types[0] ?? 'tree_type1';
+        this.guiFolder = guiFolder;
 
-    // --- HUD (اختیاری) ---
-    const hudRoot = hud ? ensureDiv('__treeHud', [
-        'position:fixed','left:12px','top:12px','z-index:9999','color:#fff',
-        'font:12px/1.4 ui-sans-serif,system-ui','pointer-events:none',
-        'text-shadow:0 1px 2px rgba(0,0,0,.6)','white-space:pre'
-    ].join(';')) : null;
-    const hudPos  = hud ? ensureDiv('__treeHudPos', 'margin-top:4px;opacity:.9;') : null;
-    if (hudRoot && hudPos) hudRoot.appendChild(hudPos);
-
-    updateHUD();
-
-    // --- interactions ---
-    const canvas = renderer.domElement;
-    const onClick = (ev: MouseEvent) => {
-        if (!editMode) return;
-        if (isEditable(ev.target as Element)) return;
-
-        const p = pickCenterWorld(camera, renderer, ray, pickTargets);
-        if (!p) return;
-
-        // ⬅️ world → local (terrain)
-        const local = p.clone();
-        terrain.worldToLocal(local);
-
-        const rec: TreeRecord = {
-            type: currentType,
-            pos: [local.x, local.y, local.z],
-            space: 'terrain-local',
-        };
-        //list.push(rec);
-        writeList(storageKey, list);
-        updateHUD();
-    };
-    canvas.addEventListener('click', onClick);
-
-    const onKey = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') { editMode = !editMode; updateHUD(); }
-        if (e.key.toLowerCase() === 'c') { // تغییر نوع سریع: C
-            currentType = cycleType(currentType);
-            updateHUD();
-        }
-        if (e.key.toLowerCase() === 'k') { // کپچر تک‌شات
-            const p = pickCenterWorld(camera, renderer, ray, pickTargets);
-            if (!p) return;
-            const local = p.clone(); terrain.worldToLocal(local);
-            list.push({ type: currentType, pos: [local.x, local.y, local.z], space: 'terrain-local' });
-            writeList(storageKey, list); updateHUD();
-        }
-        if ((e.ctrlKey || e.metaKey) && e.key === 'Backspace') {
-            list = []; writeList(storageKey, list); updateHUD();
-        }
-    };
-    window.addEventListener('keydown', onKey);
-
-    // --- public api ---
-    const api = {
-        get list(): TreeRecord[] { return list.slice(); },
-        set list(v: TreeRecord[]) { list = normalizeList(v, defaultType); writeList(storageKey, list); updateHUD(); },
-        clear() { list = []; writeList(storageKey, list); updateHUD(); },
-        setEditMode(v: boolean) { editMode = !!v; updateHUD(); },
-        getEditMode() { return editMode; },
-        setType(t: string) { currentType = t || defaultType; updateHUD(); },
-        refreshTargets(newTerrain?: THREE.Object3D) {
-            if (newTerrain) (opts as any).terrain = newTerrain;
-            rebuildPickTargets(newTerrain ?? terrain);
-        },
-        destroy() {
-            canvas.removeEventListener('click', onClick);
-            window.removeEventListener('keydown', onKey);
-            if (hudRoot?.parentElement) hudRoot.parentElement.removeChild(hudRoot);
-        }
-    };
-
-    (window as any).__treeEditor = api; // دسترسی سریع در کنسول
-    return api;
-
-    // ---------- impl helpers ----------
-    function pickCenterWorld(
-        cam: THREE.Camera,
-        rend: THREE.WebGLRenderer,
-        r: THREE.Raycaster,
-        targets: THREE.Object3D[]
-    ): THREE.Vector3 | null {
-        if (!targets.length) return null;
-        const ndc = getCanvasCenterNDC(rend);
-        cam.updateMatrixWorld(true);
-        r.setFromCamera(ndc, cam);
-        const hits = r.intersectObjects(targets, true);
-        return hits[0]?.point ? hits[0].point.clone() : null;
+        this.load();
+        this.mountHotKeys();
+        this.buildAll();
+        this.setupGUI();
     }
 
-    function rebuildPickTargets(terrainObj: THREE.Object3D) {
-        pickTargets = [];
-        terrainObj.traverse((o: any) => { if (o?.isMesh) pickTargets.push(o as THREE.Mesh); });
-        // از پشت هم قابل Raycast باشد:
-        terrainObj.traverse((o:any)=>{
-            if (o?.isMesh && o.material && 'side' in o.material && o.material.side !== THREE.DoubleSide) {
-                o.material.side = THREE.DoubleSide; o.material.needsUpdate = true;
-            }
+    dispose() {
+        if (this.unbind) {                         // ⬅️ از result استفاده نکن، فقط صدا بزن
+            this.unbind();
+            this.unbind = null;
+        }
+    }
+
+    private mountHotKeys() {
+        if (this.unbind) return;  // جلوگیری از دوبار بایند
+        this.unbind = bindTreeEditorHotkeys({
+            onToggleEdit: () => {
+                this.editing = !this.editing;
+                console.log('[TreeEditor] Edit:', this.editing);
+            },
+            onAddPoint: () => this.addPointViaRay(),
+            onClearAll: () => this.clearAll(),
+            onNextType: () => this.cycleType(+1),
+            onPrevType: () => this.cycleType(-1),
         });
     }
 
-    function updateHUD() {
-        if (!hudRoot || !hudPos) return;
-        const count = list.length;
-        hudRoot.textContent =
-            `[TreeEditor]  Edit: ${editMode ? 'ON' : 'OFF'}  |  Type: ${currentType}\n` +
-            `Records: ${count}\n` +
-            `Click/K: افزودن نقطه  |  Esc: Toggle Edit  |  Ctrl+Backspace: پاک‌کردن`;
-        const p = pickCenterWorld(camera, renderer, ray, pickTargets);
-        if (p) hudPos.textContent = `Center world: ${fmt(p.x)}, ${fmt(p.y)}, ${fmt(p.z)}`;
+    private setupGUI() {
+        if (!this.guiFolder) return;
+        this.guiFolder.add(this, 'editing').name('Edit on/off');
+        this.guiFolder.add(this, 'currentType',['tree_type1','tree_type2','tree_type3','palm_twin','palm_type1','palm_type2','palm_type3']).name('Tree type');
     }
 
-    function ensureDiv(id: string, style: string) {
-        const e = document.getElementById(id) || document.createElement('div');
-        e.id = id; (e as HTMLElement).style.cssText = style;
-        if (!e.parentElement) document.body.appendChild(e);
-        return e as HTMLDivElement;
+    private cycleType(dir: 1 | -1) {
+        if (!this.types.length) return;
+        const i = this.types.indexOf(this.currentType);
+        const j = (i + dir + this.types.length) % this.types.length;
+        this.currentType = this.types[j];
+        console.log('[TreeEditor] Type:', this.currentType);
     }
 
-    function getCanvasCenterNDC(r: THREE.WebGLRenderer) {
-        // const rect = r.domElement.getBoundingClientRect();
-        // return new THREE.Vector2(
-        //     ((rect.left + rect.width * 0.5) / rect.width) * 2 - 1,
-        //     ((rect.top  + rect.height * 0.5) / rect.height) * -2 + 1
-        // );
-        return new THREE.Vector2(0,0);
-    }
-
-    function readList(key: string): TreeRecord[] {
+    private load() {
         try {
-            const raw = localStorage.getItem(key);
-            if (!raw) return [];
-            const arr = JSON.parse(raw);
-            return normalizeList(arr, defaultType);
-        } catch { return []; }
+            const raw = localStorage.getItem(LS_KEY);
+            if (!raw) return;
+            const arr: TreeRecord[] = JSON.parse(raw);
+            this.records = Array.isArray(arr) ? arr : [];
+            this.reindex();
+        } catch (e) {
+            console.warn('[TreeEditor] load failed', e);
+        }
     }
 
-    function writeList(key: string, v: TreeRecord[]) {
-        localStorage.setItem(key, JSON.stringify(v));
+    private save() {
+        try {
+            localStorage.setItem(LS_KEY, JSON.stringify(this.records));
+        } catch (e) {
+            console.warn('[TreeEditor] Save failed', e);
+        }
     }
 
-    function normalizeList(v: any, def: string): TreeRecord[] {
-        return (Array.isArray(v) ? v : []).map((r:any) => ({
-            type: String(r?.type ?? def),
-            pos: [Number(r?.pos?.[0])||0, Number(r?.pos?.[1])||0, Number(r?.pos?.[2])||0] as [number,number,number],
-            rotY: r?.rotY != null ? Number(r.rotY) : undefined,
-            scale: r?.scale != null ? Number(r.scale) : undefined,
-            space: 'terrain-local', // ⬅️ همه را به مدل جدید یکپارچه می‌کنیم
-        }));
+    private reindex() {
+        this.byType.clear()
+        for (const r of this.records) {
+            (this.byType.get(r.type) ?? this.byType.set(r.type, []).get(r.type)!).push(r);
+        }
     }
 
-    function cycleType(t: string) {
-        // اگر لیستی از انواع داری می‌تونی جایگزین کنی:
-        const TYPES = ['tree_type1','tree_type2','tree_type3','palm_type1','palm_type2','palm_type3','palm_twin'];
-        const i = Math.max(0, TYPES.indexOf(t));
-        return TYPES[(i+1) % TYPES.length] ?? defaultType;
+    private buildAll() {
+        for (const t of this.types) this.rebuildType(t);
     }
 
-    function fmt(n:number){ return Math.round((Number(n)||0)*100)/100; }
+    private rebuildType(type: string) {
+        const old = this.groups.get(type);
+        if (old) {
+            this.scene.remove(old);
+            old.traverse((o: any) => o.dispose?.());
+            this.groups.delete(type);
+        }
 
-    function isEditable(el?: Element|null) {
-        if (!el) return false;
-        const tag = el.tagName?.toLowerCase();
-        return tag === 'input' || tag === 'textarea' || (el as HTMLElement).isContentEditable;
+        const proto = this.protos.get(type);
+        if (!proto) return;
+
+        const recs = this.byType.get(type) ?? [];
+        if (recs.length === 0) return;
+
+        const positions: [number, number, number][] = recs.map(r => {
+            const p = this.tmpV.set(r.pos[0], r.pos[1], r.pos[2]);
+            this.terrainRoot.localToWorld(p);
+            return [p.x, p.y, p.z];
+        });
+
+        const rotationsY = recs.map(r => r.rotY ?? 0)
+        const scales = recs.map(r => r.scale ?? 0)
+
+        const group = buildChunkedInstancedTrees(proto.parts, positions, {
+            rotationsY, scales, chunkSize: 128, cullDistance: 0, anchorCorrection: proto.anchorCorrection,
+            orientCorrection: (proto as any).orientCorrection,
+            yLift: (proto as any).yLift ?? 0,
+        });
+        group.name = `Trees_${type}`;
+        this.scene.add(group);
+        this.groups.set(type, group);
+    }
+
+    addPointViaRay() {
+        if (!this.editing) return;
+        const cam = this.camera;
+        // const canvas = (this.scene as any).renderer?.domElement ?? document.body;
+        if (!cam) {
+            console.warn('[TreeEditor] camera missing');
+            return;
+        }
+
+        const mx = (window as any).__mouseNDC?.x ?? 0; // اگر داری
+        const my = (window as any).__mouseNDC?.y ?? 0;
+
+        this.raycaster.setFromCamera({x: mx, y: my}, cam);
+
+        // فقط روی زیرشاخه‌های terrainRoot ray بزن
+        const targets: THREE.Object3D[] = [];
+        this.terrainRoot.traverse((o: any) => {
+            if (o.isMesh) targets.push(o);
+        });
+        const hits = this.raycaster.intersectObjects(targets, true);
+        if (!hits.length) return;
+
+        const hit = hits[0];
+        const local = hit.point.clone();
+        this.terrainRoot.worldToLocal(local);
+
+        const rec: TreeRecord = {
+            type: this.currentType,
+            pos: [local.x, local.y, local.z],
+            rotY: 10,
+            scale: 1,
+            space: 'terrain-root-local@v2',
+        };
+
+        // 1) به استیت اضافه کن
+        this.records.push(rec);
+        (this.byType.get(rec.type) ?? this.byType.set(rec.type, []).get(rec.type)!).push(rec);
+
+        // 2) فقط گروه همان type را بازسازی کن (لایو)
+        this.rebuildType(rec.type);
+
+        // 3) ذخیره کن
+        this.save();
+
+        console.log('[TreeEditor] +1', rec.type, rec.pos);
+    }
+
+    clearAll() {
+        this.records = [];
+        this.byType.clear();
+        this.save();
+        // همه گروه‌ها را حذف کن
+        for (const [t, g] of this.groups) {
+            this.scene.remove(g);
+        }
+        this.groups.clear();
+        console.log('[TreeEditor] cleared all');
     }
 }

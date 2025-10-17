@@ -22,6 +22,11 @@ const player = new Player(scene);
 
 const {gltf} = createLoaders(renderer, PATHS.BASIS);
 
+if (import.meta.env.DEV) {
+    const gui =mountGUI({renderer, player });
+    (window as any).gui = gui;
+}
+
 const {terrain, bounds, center,sky, clouds} =
     await buildScene(scene, player.camera as THREE.PerspectiveCamera,renderer, gltf, {island: PATHS.ISLAND}, );
 //terrain.traverse((o:any)=> o.isMesh && (o.material = new THREE.MeshBasicMaterial({color:0xcccccc, wireframe:true})));
@@ -37,7 +42,7 @@ const { lat, lon } = await getUserLocation();
 //const weather = await fetchWeather(lat, lon);
 // فقط اگر بالای افق هستن
 const now = new Date();
- now.setHours(6, 15, 0, 0);
+ now.setHours(14, 15, 0, 0);
 // // اگر ابری باشه (مثلاً بیشتر از 70٪)
 // const cloudy = (weather.cloudCoverPct ?? 0) > 70;
 const skyBG = setupSkyBackground(scene, renderer);
@@ -52,9 +57,7 @@ sky.setStarsBySun(astro.sun.altitudeDeg);
 
 await spawnOnTerrain(player, terrain, { center, searchRadius: 30, tries: 25 });
 // GUI (اختیاری)
-if (import.meta.env.DEV) {
-    mountGUI({renderer, player });
-}
+
 
 //const canvas = (renderer as any)?.domElement ?? document.querySelector('canvas')!;
 //  initCoordCapture({
