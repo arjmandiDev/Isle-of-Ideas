@@ -13,21 +13,24 @@ export async function loadTerrain(gltfLoader: any, url: string): Promise<THREE.O
 
     hardenMaterials(root);
     applyFoliageMask(root);
-
     // روی همهٔ Meshهای بزرگ، BVH بساز (زمین/صخره‌ها/…)
     root.traverse((o: any) => {
         if (o.isMesh && o.geometry?.attributes?.position) {
+
             const verts = o.geometry.attributes.position.count;
             if (verts >= 1000) {
                 (o.geometry as any).boundsTree = new MeshBVH(o.geometry, {lazyGeneration: false});
             }
         }
+
         if (o.isMesh && o.material && o.material.map) {
             const t = o.material.map;
+
             t.magFilter = THREE.NearestFilter;
             t.minFilter = THREE.NearestFilter;
             t.generateMipmaps = false;
             t.needsUpdate = true;
+
         }
     });
 
