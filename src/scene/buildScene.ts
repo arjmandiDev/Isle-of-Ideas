@@ -36,7 +36,7 @@ export async function buildScene(
     const radiusIsland = box.getSize(new THREE.Vector3()).length() * 0.5;
 
     // آسمان/ابر/آب/مرز (مثل قبل)
-    const sky = createSky({ bgHex: 0x78a7ff, fogDensity: 0.0024 });
+    const sky = createSky();
     scene.add(sky.group);
     (scene as any).__skyTick__ = (dt: number, cam: THREE.Camera) => sky.tick(dt, cam);
 
